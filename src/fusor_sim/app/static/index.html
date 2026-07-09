@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fusor-sim — simulatore didattico di fusione</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<style>
+  :root {
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;  /* blu */
+    --series-2: #199e70;  /* acqua */
+    --series-3: #c98500;  /* giallo */
+    --series-6: #e66767;  /* rosso */
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-critical: #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--text-muted); font-size: 12px; }
+  .badge {
+    padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    background: var(--surface-1); border: 1px solid var(--border);
+    color: var(--text-secondary); text-transform: uppercase;
+  }
+  .badge.run { color: var(--series-1); }
+  .badge.done { color: var(--status-good); }
+  .badge.paused { color: var(--status-warning); }
+  #notjudge {
+    display: none; padding: 2px 10px; border-radius: 10px; font-size: 12px;
+    font-weight: 700; color: var(--status-warning); border: 1px solid currentColor;
+  }
+  .llm-dot { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+  main { flex: 1; display: grid; grid-template-columns: 400px 1fr; min-height: 0; }
+
+  /* ---- chat ---- */
+  #chat { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
+  #messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 8px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: #1c3a5e; }
+  .msg.bot { align-self: flex-start; background: var(--surface-1); border: 1px solid var(--border); }
+  .msg.bot .src { color: var(--text-muted); font-size: 11px; margin-top: 6px; }
+  .msg.sys { align-self: center; color: var(--text-muted); font-size: 12px; }
+  #chatform { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
+  #chatform input {
+    flex: 1; background: var(--surface-1); border: 1px solid var(--border);
+    color: var(--text-primary); border-radius: 8px; padding: 9px 12px; font: inherit;
+  }
+  button {
+    background: var(--surface-1); color: var(--text-primary); font: inherit;
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--text-muted); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #1c3a5e; border-color: var(--series-1); }
+
+  /* ---- pannello destro ---- */
+  #panel { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+  #controls { display: flex; gap: 8px; padding: 10px 14px; align-items: center; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  #controls .spacer { flex: 1; }
+  #controls .meta { color: var(--text-muted); font-size: 12px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 6px; }
+
+  /* ---- scena 3D ---- */
+  #scene-card { margin: 12px 14px 0; position: relative; }
+  #viz3d { width: 100%; height: 380px; border-radius: 8px; overflow: hidden; }
+  #scene-note { color: var(--text-muted); font-size: 11px; padding: 6px 8px 2px; }
+  #comp-panel {
+    position: absolute; top: 14px; right: 14px; width: 240px; display: none;
+    background: rgba(26,26,25,0.94); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; font-size: 12px;
+  }
+  #comp-panel h3 { margin: 0 0 8px; font-size: 13px; }
+  #comp-panel .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  #comp-panel .row label { flex: 0 0 92px; color: var(--text-secondary); }
+  #comp-panel input[type=range] { flex: 1; accent-color: var(--series-1); }
+  #comp-panel .val { flex: 0 0 58px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  #comp-msg { color: var(--status-warning); font-size: 11px; min-height: 14px; margin-top: 4px; white-space: pre-wrap; }
+
+  #charts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px 14px; }
+  .plot { width: 100%; height: 240px; }
+
+  /* ---- referto ---- */
+  #verdict { margin: 0 14px 14px; }
+  #verdict .head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+  #verdict .head .title { font-weight: 600; }
+  #verdict .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700;
+    border: 1px solid currentColor;
+  }
+  #verdict .pill.reliable { color: var(--status-good); }
+  #verdict .pill.marginal { color: var(--status-warning); }
+  #verdict .pill.unreliable { color: var(--status-critical); }
+  #verdict .pill.fieldonly { color: var(--series-1); }
+  #verdict .body { padding: 0 12px 12px; color: var(--text-secondary); white-space: pre-wrap; }
+  #verdict .nums { display: flex; gap: 24px; padding: 0 12px 12px; flex-wrap: wrap; }
+  .stat .v { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+  .stat .l { font-size: 11px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>fusor-sim</h1>
+  <span class="sub">simulatore didattico di fusione — il referto è del simulatore, non dell'LLM</span>
+  <span id="state" class="badge">…</span>
+  <span id="notjudge" title="">⚠ NON GIUDICABILE</span>
+  <span id="llm" class="llm-dot">LLM: …</span>
+</header>
+<main>
+  <section id="chat">
+    <div id="messages">
+      <div class="msg sys">Chiedi in linguaggio naturale: «porta la tensione a −60 kV e avvia»,
+        «sposta il catodo di 2 cm», «perché il bilancio è negativo?»
+        Puoi anche cliccare un componente nella scena 3D e riferirti a quello.</div>
+    </div>
+    <form id="chatform">
+      <input id="chatinput" placeholder="Scrivi al simulatore…" autocomplete="off">
+      <button class="primary" type="submit">Invia</button>
+    </form>
+  </section>
+  <section id="panel">
+    <div id="controls">
+      <button class="primary" id="btn-run">Prepara &amp; Avvia</button>
+      <button id="btn-pause">Pausa</button>
+      <button id="btn-resume">Riprendi</button>
+      <button id="btn-preview">Campo 3D</button>
+      <button id="btn-reset">Reset</button>
+      <div class="spacer"></div>
+      <span class="meta" id="runmeta"></span>
+    </div>
+    <div id="scene-card" class="card">
+      <div id="viz3d"></div>
+      <div id="comp-panel">
+        <h3 id="comp-title">componente</h3>
+        <div id="comp-rows"></div>
+        <div id="comp-msg"></div>
+      </div>
+      <div id="scene-note">Rappresentazione 3D del modello radiale: le posizioni angolari
+        delle particelle sono ricostruzioni statistiche (distribuzione isotropa), non traiettorie 3D calcolate.
+        Clicca un componente per selezionarlo e modificarlo; trascina il catodo per spostarlo.</div>
+    </div>
+    <div id="charts">
+      <div class="card"><div id="plot-potential" class="plot"></div></div>
+      <div class="card"><div id="plot-spectrum" class="plot"></div></div>
+      <div class="card"><div id="plot-neutrons" class="plot"></div></div>
+      <div class="card"><div id="plot-gridloss" class="plot"></div></div>
+    </div>
+    <div id="verdict" class="card" hidden>
+      <div class="head">
+        <span class="title">Referto fisico</span>
+        <span class="pill" id="verdict-pill"></span>
+      </div>
+      <div class="nums" id="verdict-nums"></div>
+      <div class="body" id="verdict-text"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ============ livello dati: polling, grafici 2D, chat, referto ============ */
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const LAYOUT = {
+  paper_bgcolor: css('--surface-1'), plot_bgcolor: css('--surface-1'),
+  font: { family: 'system-ui, sans-serif', size: 11, color: css('--text-secondary') },
+  margin: { l: 55, r: 12, t: 30, b: 38 },
+  xaxis: { gridcolor: css('--grid'), zerolinecolor: css('--baseline'), linecolor: css('--baseline') },
+  yaxis: { gridcolor: css('--grid'), zerolinecolor: css('--baseline'), linecolor: css('--baseline') },
+  showlegend: false,
+};
+const CFG = { displayModeBar: false, responsive: true };
+const lay = (title, extra) => Object.assign({}, LAYOUT, { title: { text: title, font: { size: 12, color: css('--text-primary') } } },
+  { xaxis: Object.assign({}, LAYOUT.xaxis, extra.x || {}), yaxis: Object.assign({}, LAYOUT.yaxis, extra.y || {}) });
+
+let lastStep = -1, state = 'idle', previewStamp = '';
+window.lastStatus = null;
+
+async function jget(url) { const r = await fetch(url); return r.json(); }
+async function jpost(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: body ? JSON.stringify(body) : '{}' });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+window.jpost = jpost;
+
+function setBadge(s) {
+  const el = document.getElementById('state');
+  el.textContent = s; el.className = 'badge ' + s;
+}
+
+async function poll() {
+  try {
+    const st = await jget('/api/status');
+    window.lastStatus = st;
+    state = st.state; setBadge(state);
+    document.getElementById('llm').textContent = 'LLM: ' + (st.llm_available ? 'connesso' : 'assente');
+    const nj = document.getElementById('notjudge');
+    nj.style.display = st.judgeable ? 'none' : 'inline-block';
+    nj.title = st.judgeable_reason || '';
+    document.getElementById('btn-run').disabled = !st.judgeable;
+    if (window.fusor3d) window.fusor3d.syncDraft(st.geometry, state);
+    const needSnap = (st.last_step !== null && st.last_step !== lastStep);
+    if (needSnap || state === 'idle') {
+      const data = await jget('/api/snapshot');
+      if (needSnap) { lastStep = st.last_step; redraw(data); }
+      const fp = data.field_preview;
+      if (fp) {
+        const stamp = fp.residual_rel + ':' + fp.cathode_offset_m.join(',');
+        if (stamp !== previewStamp) {
+          previewStamp = stamp;
+          if (window.fusor3d) window.fusor3d.setPreview(fp);
+          drawVerdict(fp.verdict);
+        }
+      }
+    }
+  } catch (e) { /* server occupato: riprova al giro dopo */ }
+  setTimeout(poll, 800);
+}
+
+function redraw(data) {
+  const s = data.snapshot; if (!s) return;
+  document.getElementById('runmeta').textContent =
+    `step ${s.meta.step} · t = ${(s.meta.sim_time_s*1e6).toFixed(2)} µs · wall ${s.meta.wall_clock_s.toFixed(1)} s`;
+
+  const rc = s.geometry.cathode_radius_m, ra = s.geometry.anode_radius_m;
+  const refline = x => ({ type: 'line', x0: x, x1: x, y0: 0, y1: 1, yref: 'paper',
+                          line: { color: css('--text-muted'), width: 1, dash: 'dot' } });
+  Plotly.react('plot-potential', [{
+    x: s.fields.r_m, y: s.fields.potential_v, mode: 'lines',
+    line: { color: css('--series-1'), width: 2 }, hovertemplate: 'r=%{x:.3f} m<br>φ=%{y:.0f} V<extra></extra>',
+  }], Object.assign(lay('Potenziale φ(r) — linee: catodo e anodo', {
+    x: { title: 'r (m)' }, y: { title: 'V' } }), { shapes: [refline(rc), refline(ra)] }), CFG);
+
+  const nb = s.spectrum.counts.length;
+  const centers = s.spectrum.counts.map((_, i) => (i + 0.5) * s.spectrum.e_max_ev / nb / 1000);
+  Plotly.react('plot-spectrum', [{
+    x: centers, y: s.spectrum.counts, type: 'bar',
+    marker: { color: css('--series-2') }, hovertemplate: '%{x:.1f} keV<br>%{y:.3g} ioni<extra></extra>',
+  }], lay('Spettro energia ioni', { x: { title: 'keV' }, y: { title: 'ioni', type: 'log' } }), CFG);
+
+  const t = data.series.map(p => p.sim_time_s * 1e6);
+  Plotly.react('plot-neutrons', [{
+    x: t, y: data.series.map(p => p.neutron_rate_per_s), mode: 'lines',
+    line: { color: css('--series-3'), width: 2 }, hovertemplate: 't=%{x:.2f} µs<br>%{y:.3g} n/s<extra></extra>',
+  }], lay('Neutroni al secondo', { x: { title: 't (µs)' }, y: { title: 'n/s', type: 'log' } }), CFG);
+
+  Plotly.react('plot-gridloss', [{
+    x: t, y: data.series.map(p => p.grid_loss_w), mode: 'lines',
+    line: { color: css('--series-6'), width: 2 }, hovertemplate: 't=%{x:.2f} µs<br>%{y:.3g} W<extra></extra>',
+  }], lay('Potenza persa sulla griglia', { x: { title: 't (µs)' }, y: { title: 'W' } }), CFG);
+
+  if (window.fusor3d) window.fusor3d.setParticles(
+    s.particles.r_m, s.particles.energy_ev, Math.abs(window.lastStatus?.physics?.cathode_voltage_v || 40000));
+  drawVerdict(s.verdict);
+}
+
+function drawVerdict(v) {
+  const box = document.getElementById('verdict'); box.hidden = false;
+  const pill = document.getElementById('verdict-pill');
+  if (v.scope === 'field_only') {
+    pill.className = 'pill fieldonly';
+    pill.textContent = '◈ solo campo';
+  } else {
+    const icons = { reliable: '✓ affidabile', marginal: '⚠ al limite', unreliable: '✖ inaffidabile' };
+    pill.className = 'pill ' + v.numerical_reliability;
+    pill.textContent = icons[v.numerical_reliability] || v.numerical_reliability;
+  }
+  const fmt = (x, unit) => x === null ? '—' : Number(x).toExponential(2) + (unit || '');
+  document.getElementById('verdict-nums').innerHTML = `
+    <div class="stat"><div class="v">${v.produces_fusion === null ? '—' : (v.produces_fusion ? 'sì' : 'no')}</div><div class="l">produce fusione</div></div>
+    <div class="stat"><div class="v">${fmt(v.fusion_rate_per_s)}</div><div class="l">reazioni/s</div></div>
+    <div class="stat"><div class="v">${fmt(v.net_energy_balance_w, ' W')}</div><div class="l">bilancio netto</div></div>
+    <div class="stat"><div class="v">${v.lawson_distance_orders === null ? '—' : Number(v.lawson_distance_orders).toFixed(1)}</div><div class="l">ordini da Lawson</div></div>`;
+  document.getElementById('verdict-text').textContent = v.honest_summary;
+}
+
+function addMsg(text, cls, sources) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls; div.textContent = text;
+  if (sources && sources.length) {
+    const src = document.createElement('div'); src.className = 'src';
+    src.textContent = 'fonti: ' + sources.join(', '); div.appendChild(src);
+  }
+  const box = document.getElementById('messages');
+  box.appendChild(div); box.scrollTop = box.scrollHeight;
+}
+
+document.getElementById('chatform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const input = document.getElementById('chatinput');
+  const text = input.value.trim(); if (!text) return;
+  input.value = ''; addMsg(text, 'user');
+  addMsg('…', 'sys');
+  try {
+    const res = await jpost('/api/chat', {
+      message: text,
+      selected_component: window.fusor3d ? window.fusor3d.selectedName() : null,
+    });
+    document.querySelector('.msg.sys:last-child').remove();
+    addMsg(res.reply, 'bot', res.sources);
+    if (res.run_started) addMsg('▶ run avviato dalla chat', 'sys');
+    if (res.preview_done) addMsg('◈ anteprima campo calcolata', 'sys');
+  } catch (err) {
+    document.querySelector('.msg.sys:last-child').remove();
+    addMsg('Errore: ' + err.message, 'sys');
+  }
+});
+
+const act = (id, url, body) => document.getElementById(id).addEventListener('click', async () => {
+  try { await jpost(url, body); } catch (err) { addMsg(id.replace('btn-','') + ': ' + err.message, 'sys'); }
+});
+act('btn-run', '/api/run', { max_steps: 20000, n_particles: 4000, snapshot_interval: 500, probe: true });
+act('btn-pause', '/api/pause');
+act('btn-resume', '/api/resume');
+act('btn-reset', '/api/reset');
+document.getElementById('btn-reset').addEventListener('click', () => {
+  lastStep = -1; previewStamp = '';
+  if (window.fusor3d) window.fusor3d.clearPreview();
+});
+document.getElementById('btn-preview').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-preview');
+  btn.disabled = true; btn.textContent = 'Calcolo…';
+  try { await jpost('/api/field_preview'); }
+  catch (err) { addMsg('anteprima: ' + err.message, 'sys'); }
+  finally { btn.disabled = false; btn.textContent = 'Campo 3D'; }
+});
+
+poll();
+</script>
+
+<script type="module">
+/* ============ scena 3D: viewer + editor dei componenti ============ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+const container = document.getElementById('viz3d');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+  45, container.clientWidth / container.clientHeight, 0.001, 10);
+camera.position.set(0.32, 0.22, 0.32);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 0, 0);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+
+/* componenti: sfere unitarie riscalate al raggio reale */
+function shell(name, color, opacity, segments) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1, segments, Math.round(segments * 0.6)),
+    new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity }));
+  mesh.name = name;
+  scene.add(mesh);
+  return mesh;
+}
+const chamberMesh = shell('camera', 0x898781, 0.08, 28);
+const anodeMesh = shell('anodo', 0x3987e5, 0.30, 24);
+const cathodeMesh = shell('catodo', 0xe66767, 0.55, 18);
+
+/* particelle: direzioni fisse per indice (ricostruzione isotropa dichiarata) */
+const MAXP = 512;
+function mulberry32(a) { return () => {
+  a |= 0; a = a + 0x6D2B79F5 | 0;
+  let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const dirs = [];
+for (let i = 0; i < MAXP; i++) {
+  const rnd = mulberry32(i * 2654435761 + 1);
+  const u = 2 * rnd() - 1, phi = 2 * Math.PI * rnd(), s = Math.sqrt(1 - u * u);
+  dirs.push([s * Math.cos(phi), s * Math.sin(phi), u]);
+}
+const pGeom = new THREE.BufferGeometry();
+pGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
+pGeom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
+pGeom.setDrawRange(0, 0);
+const points = new THREE.Points(pGeom, new THREE.PointsMaterial({
+  size: 0.005, vertexColors: true, transparent: true, opacity: 0.95 }));
+scene.add(points);
+
+const cLow = new THREE.Color('#199e70'), cMid = new THREE.Color('#c98500'), cHigh = new THREE.Color('#e66767');
+function energyColor(f) {
+  const c = new THREE.Color();
+  if (f < 0.5) c.lerpColors(cLow, cMid, f * 2); else c.lerpColors(cMid, cHigh, (f - 0.5) * 2);
+  return c;
+}
+
+/* piano di taglio per l'anteprima del campo */
+let slicePlane = null;
+function setPreview(fp) {
+  clearPreview();
+  const n = fp.n_nodes, ext = fp.grid_extent_m;
+  const canvas = document.createElement('canvas');
+  canvas.width = n; canvas.height = n;
+  const g = canvas.getContext('2d');
+  const img = g.createImageData(n, n);
+  const dark = new THREE.Color('#0d366b'), light = new THREE.Color('#cde2fb');
+  let vmin = 0;
+  for (const row of fp.slice_z0_v) for (const v of row) vmin = Math.min(vmin, v);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const v = fp.slice_z0_v[i][j];
+    const t = vmin < 0 ? v / vmin : 0;  // 1 al catodo, 0 all'anodo
+    const c = new THREE.Color().lerpColors(dark, light, t);
+    const px = 4 * ((n - 1 - j) * n + i);  // x -> destra, y -> alto
+    img.data[px] = c.r * 255; img.data[px+1] = c.g * 255; img.data[px+2] = c.b * 255;
+    img.data[px+3] = 235;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  slicePlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(2 * ext, 2 * ext),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide }));
+  slicePlane.name = 'campo';
+  scene.add(slicePlane);
+}
+function clearPreview() {
+  if (slicePlane) { scene.remove(slicePlane); slicePlane = null; }
+}
+
+/* selezione via raycast + gizmo di traslazione per il catodo */
+const raycaster = new THREE.Raycaster();
+let selected = null, dragging = false;
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setMode('translate');
+gizmo.setSize(0.7);
+scene.add(gizmo);
+gizmo.addEventListener('dragging-changed', e => {
+  orbit.enabled = !e.value;
+  dragging = e.value;
+  if (!e.value) commitCathodePosition();
+});
+
+async function sendIntent(target, value) {
+  try {
+    const res = await window.jpost('/api/intent', { action: 'SET', target, value });
+    document.getElementById('comp-msg').textContent = res.accepted ? '' : res.message;
+    return res.accepted;
+  } catch (err) {
+    document.getElementById('comp-msg').textContent = err.message;
+    return false;
+  }
+}
+
+async function commitCathodePosition() {
+  const p = cathodeMesh.position;
+  await sendIntent('geometry.cathode_offset_x_m', +p.x.toFixed(5));
+  await sendIntent('geometry.cathode_offset_y_m', +p.y.toFixed(5));
+  await sendIntent('geometry.cathode_offset_z_m', +p.z.toFixed(5));
+}
+
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || dragging) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 5) return;  // era una rotazione della camera
+  const rect = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const hits = raycaster.intersectObjects([cathodeMesh, anodeMesh, chamberMesh], false);
+  select(hits.length ? hits[0].object : null);
+});
+
+const PANELS = {
+  catodo: [
+    ['raggio (m)', 'geometry.cathode_radius_m', 0.01, 0.14, 0.001],
+    ['trasparenza', 'geometry.grid_transparency', 0.50, 0.99, 0.01],
+    ['offset x (m)', 'geometry.cathode_offset_x_m', -0.08, 0.08, 0.002],
+    ['offset y (m)', 'geometry.cathode_offset_y_m', -0.08, 0.08, 0.002],
+    ['offset z (m)', 'geometry.cathode_offset_z_m', -0.08, 0.08, 0.002],
+  ],
+  anodo: [['raggio (m)', 'geometry.anode_radius_m', 0.06, 0.25, 0.005]],
+  camera: [['raggio (m)', 'geometry.chamber_radius_m', 0.10, 0.50, 0.005]],
+};
+
+function select(mesh) {
+  selected = mesh;
+  gizmo.detach();
+  const panel = document.getElementById('comp-panel');
+  if (!mesh) { panel.style.display = 'none'; return; }
+  if (mesh.name === 'catodo') gizmo.attach(cathodeMesh);
+  panel.style.display = 'block';
+  document.getElementById('comp-title').textContent =
+    { catodo: 'Catodo (griglia interna)', anodo: 'Anodo (griglia esterna)', camera: 'Camera a vuoto' }[mesh.name];
+  const rows = document.getElementById('comp-rows');
+  rows.innerHTML = '';
+  for (const [label, target, min, max, step] of PANELS[mesh.name]) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" data-target="${target}"><span class="val"></span>`;
+    const input = row.querySelector('input'), val = row.querySelector('.val');
+    input.addEventListener('input', () => { val.textContent = (+input.value).toFixed(3); });
+    input.addEventListener('change', async () => {
+      const ok = await sendIntent(target, +input.value);
+      if (!ok && window.lastStatus) syncPanel(window.lastStatus.geometry);
+    });
+    rows.appendChild(row);
+  }
+  if (window.lastStatus) syncPanel(window.lastStatus.geometry);
+}
+
+function syncPanel(g) {
+  for (const input of document.querySelectorAll('#comp-rows input')) {
+    if (document.activeElement === input) continue;
+    const path = input.dataset.target.split('.')[1];
+    input.value = g[path];
+    input.nextElementSibling.textContent = (+g[path]).toFixed(3);
+  }
+}
+
+/* sincronizzazione scena <- bozza dell'orchestratore */
+function syncDraft(g, state) {
+  chamberMesh.scale.setScalar(g.chamber_radius_m);
+  anodeMesh.scale.setScalar(g.anode_radius_m);
+  cathodeMesh.scale.setScalar(g.cathode_radius_m);
+  if (!dragging) {
+    cathodeMesh.position.set(g.cathode_offset_x_m, g.cathode_offset_y_m, g.cathode_offset_z_m);
+  }
+  gizmo.enabled = (state === 'idle' || state === 'paused');
+  gizmo.visible = gizmo.enabled && selected?.name === 'catodo';
+  if (!dragging && selected) syncPanel(g);
+}
+
+function setParticles(radii, energies, vmaxEv) {
+  const k = Math.min(radii.length, MAXP);
+  const pos = pGeom.attributes.position.array, col = pGeom.attributes.color.array;
+  const off = cathodeMesh.position;
+  for (let i = 0; i < k; i++) {
+    const d = dirs[i], r = radii[i];
+    pos[3*i] = d[0] * r; pos[3*i+1] = d[1] * r; pos[3*i+2] = d[2] * r;
+    const c = energyColor(Math.min(energies[i] / vmaxEv, 1));
+    col[3*i] = c.r; col[3*i+1] = c.g; col[3*i+2] = c.b;
+  }
+  pGeom.setDrawRange(0, k);
+  pGeom.attributes.position.needsUpdate = true;
+  pGeom.attributes.color.needsUpdate = true;
+}
+
+window.fusor3d = {
+  syncDraft, setParticles, setPreview, clearPreview,
+  selectedName: () => selected ? selected.name : null,
+};
+
+new ResizeObserver(() => {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}).observe(container);
+
+(function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
