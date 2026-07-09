@@ -178,14 +178,10 @@
       <button id="tab-guide">Guida</button>
     </div>
     <div id="chat" class="active">
-      <div id="messages">
-        <div class="msg sys">Chiedi in linguaggio naturale: «porta la tensione a −60 kV e avvia»,
-          «sposta il catodo di 2 cm», «perché il bilancio è negativo?»
-          Puoi cliccare un componente nella scena 3D e riferirti a quello.
-          Nuovo qui? Apri la scheda «Guida»: 9 lezioni con esperimenti guidati.</div>
-      </div>
+      <div id="messages"></div>
       <form id="chatform">
         <input id="chatinput" placeholder="Scrivi al simulatore…" autocomplete="off">
+        <button type="button" id="btn-clearchat" title="Pulisci la chat">🗑</button>
         <button class="primary" type="submit">Invia</button>
       </form>
     </div>
@@ -207,7 +203,8 @@
       <button id="btn-pause">Pausa</button>
       <button id="btn-resume">Riprendi</button>
       <button id="btn-preview">Campo 3D</button>
-      <button id="btn-reset">Reset</button>
+      <button id="btn-reset" title="Torna a IDLE conservando i parametri">Interrompi</button>
+      <button id="btn-factory" title="Riporta tutto ai valori di fabbrica">Reimposta progetto</button>
       <div class="spacer"></div>
       <span class="meta" id="runmeta"></span>
     </div>
@@ -358,6 +355,16 @@ function drawVerdict(v) {
   document.getElementById('verdict-text').textContent = v.honest_summary;
 }
 
+const WELCOME = `Chiedi in linguaggio naturale: «porta la tensione a −60 kV e avvia»,
+«sposta il catodo di 2 cm», «perché il bilancio è negativo?»
+Puoi cliccare un componente nella scena 3D e riferirti a quello.
+Nuovo qui? Apri la scheda «Guida»: 9 lezioni con esperimenti guidati.`;
+
+function clearChat() {
+  document.getElementById('messages').innerHTML = '';
+  addMsg(WELCOME, 'sys');
+}
+
 function addMsg(text, cls, sources) {
   const div = document.createElement('div');
   div.className = 'msg ' + cls; div.textContent = text;
@@ -401,6 +408,40 @@ document.getElementById('btn-reset').addEventListener('click', () => {
   lastStep = -1; previewStamp = '';
   if (window.fusor3d) window.fusor3d.clearPreview();
 });
+
+document.getElementById('btn-clearchat').addEventListener('click', clearChat);
+
+/* reimposta progetto: conferma a doppio click, niente dialog nativi */
+let factoryArmed = null;
+document.getElementById('btn-factory').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-factory');
+  if (!factoryArmed) {
+    btn.textContent = 'Confermi? Cancella tutto';
+    btn.style.borderColor = css('--status-critical');
+    factoryArmed = setTimeout(() => {
+      btn.textContent = 'Reimposta progetto';
+      btn.style.borderColor = '';
+      factoryArmed = null;
+    }, 4000);
+    return;
+  }
+  clearTimeout(factoryArmed); factoryArmed = null;
+  btn.textContent = 'Reimposta progetto';
+  btn.style.borderColor = '';
+  try {
+    await jpost('/api/factory_reset');
+    lastStep = -1; previewStamp = '';
+    clearChat();
+    addMsg('↺ progetto reimpostato ai valori di fabbrica', 'sys');
+    if (window.fusor3d) window.fusor3d.clearPreview();
+    for (const id of ['plot-potential', 'plot-spectrum', 'plot-neutrons', 'plot-gridloss'])
+      Plotly.purge(id);
+    document.getElementById('verdict').hidden = true;
+    document.getElementById('runmeta').textContent = '';
+  } catch (err) { addMsg('reimposta: ' + err.message, 'sys'); }
+});
+
+clearChat();
 document.getElementById('btn-preview').addEventListener('click', async () => {
   const btn = document.getElementById('btn-preview');
   btn.disabled = true; btn.textContent = 'Calcolo…';

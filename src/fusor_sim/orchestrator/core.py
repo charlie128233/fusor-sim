@@ -286,6 +286,20 @@ class Orchestrator:
         self.run_config = None
         self._transition(OrchestratorState.IDLE)
 
+    def factory_reset(self) -> None:
+        """Reimposta il progetto: bozza ai default, vincoli e fonti azzerati."""
+        self._discard_engine()
+        defaults = example_run_config()
+        self.geometry = defaults.geometry
+        self.physics = defaults.physics
+        self.constraints = []
+        self.formula_sources = []
+        self.run_config = None
+        self.last_state = None
+        self.run_states = []
+        self.history.append("progetto reimpostato ai valori di fabbrica")
+        self._transition(OrchestratorState.IDLE)
+
     # ------------------------------------------------- anteprima di campo
 
     def judgeable(self) -> tuple[bool, str]:

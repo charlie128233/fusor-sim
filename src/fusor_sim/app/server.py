@@ -351,6 +351,16 @@ def create_app(llm: Callable[[list[dict]], str] | None = None) -> FastAPI:
             ctx.field_preview = None
         return {"ok": True}
 
+    @app.post("/api/factory_reset")
+    def factory_reset():
+        """Reimposta il progetto: bozza ai default, vincoli e risultati azzerati."""
+        with ctx.lock:
+            ctx.orchestrator.factory_reset()
+            ctx.snapshot = None
+            ctx.series = []
+            ctx.field_preview = None
+        return {"ok": True}
+
     return app
 
 

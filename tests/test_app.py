@@ -190,3 +190,30 @@ def test_reset(client):
     data = client.get("/api/status").json()
     assert data["state"] == "idle"
     assert client.get("/api/snapshot").json()["snapshot"] is None
+
+
+def test_factory_reset_endpoint(client):
+    """Reimposta progetto: bozza ai default, vincoli e risultati azzerati."""
+    client.post("/api/chat", json={"message": "pressione a 0.8"})  # SET dal fake LLM
+    client.post(
+        "/api/intent",
+        json={"action": "SET", "target": "geometry.cathode_offset_x_m", "value": 0.03},
+    )
+    client.post(
+        "/api/run",
+        json={"max_steps": 400, "n_particles": 1000, "snapshot_interval": 200, "probe": False},
+    )  # 409 atteso: non giudicabile — irrilevante, serve solo stato sporco
+
+    resp = client.post("/api/factory_reset")
+    assert resp.status_code == 200
+
+    status = client.get("/api/status").json()
+    assert status["state"] == "idle"
+    assert status["physics"]["pressure_pa"] == 0.5
+    assert status["geometry"]["cathode_offset_x_m"] == 0.0
+    assert status["judgeable"] is True
+    assert status["constraints"] == []
+    snap = client.get("/api/snapshot").json()
+    assert snap["snapshot"] is None
+    assert snap["series"] == []
+    assert snap["field_preview"] is None

@@ -221,6 +221,32 @@ def test_query_and_formula_source():
     assert orch.formula_sources == ["NRL Plasma Formulary 2019"]
 
 
+def test_factory_reset_restores_defaults():
+    orch = Orchestrator()
+    orch.apply_intent(
+        ChatIntent(action=ChatAction.SET, target="physics.pressure_pa", value=2.0)
+    )
+    orch.apply_intent(
+        ChatIntent(
+            action=ChatAction.ADD_CONSTRAINT,
+            target="physics.pressure_pa",
+            value="<= 5",
+        )
+    )
+    orch.prepare(**_prepare_kwargs())
+    orch.start()
+    orch.advance()  # c'è un run in corso, con last_state
+
+    orch.factory_reset()
+    assert orch.state is OrchestratorState.IDLE
+    assert orch.physics.pressure_pa == 0.5  # default
+    assert orch.constraints == []
+    assert orch.formula_sources == []
+    assert orch.last_state is None
+    assert orch.run_config is None
+    assert any("fabbrica" in h for h in orch.history)
+
+
 def test_history_records_transitions_and_intents():
     orch = Orchestrator()
     orch.apply_intent(
