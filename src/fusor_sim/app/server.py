@@ -23,7 +23,30 @@ from fusor_sim.orchestrator import Orchestrator, OrchestratorState, StateError
 from fusor_sim.rag import KnowledgeBase
 
 _HERE = Path(__file__).parent
-_KNOWLEDGE_DIR = _HERE.parent.parent.parent / "knowledge"
+_ROOT = _HERE.parent.parent.parent
+_KNOWLEDGE_DIR = _ROOT / "knowledge"
+_GUIDE_DIR = _ROOT / "guide"
+
+
+def _guide_lessons() -> list[dict]:
+    """Indice della guida didattica: id, titolo, livello, sommario."""
+    lessons = []
+    for path in sorted(_GUIDE_DIR.glob("*.md")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        title = next(
+            (l.lstrip("# ").strip() for l in lines if l.startswith("# ")), path.stem
+        )
+        meta = next((l for l in lines if l.startswith("**Livello:**")), "")
+        level = "base"
+        if "intermedio" in meta:
+            level = "intermedio"
+        elif "avanzato" in meta:
+            level = "avanzato"
+        objective = meta.split("**Obiettivo:**")[-1].strip(" ·") if "Obiettivo" in meta else ""
+        lessons.append(
+            {"id": path.stem, "title": title, "level": level, "objective": objective}
+        )
+    return lessons
 
 
 class ChatRequest(BaseModel):
@@ -53,7 +76,7 @@ class AppContext:
         self.llm_client = LLMClient() if llm is None else None
         self.pipeline = ChatPipeline(
             self.orchestrator,
-            KnowledgeBase(_KNOWLEDGE_DIR),
+            KnowledgeBase([_KNOWLEDGE_DIR, _GUIDE_DIR]),
             llm if llm is not None else self.llm_client,
         )
         self.snapshot: dict | None = None  # ultimo SimState serializzato
@@ -304,6 +327,20 @@ def create_app(llm: Callable[[list[dict]], str] | None = None) -> FastAPI:
                 raise HTTPException(status_code=409, detail=str(exc))
         ctx._spawn_thread()
         return {"ok": True}
+
+    @app.get("/api/guide")
+    def guide_index():
+        return {"lessons": _guide_lessons()}
+
+    @app.get("/api/guide/{lesson_id}")
+    def guide_lesson(lesson_id: str):
+        valid = {lesson["id"] for lesson in _guide_lessons()}
+        if lesson_id not in valid:
+            raise HTTPException(status_code=404, detail=f"Lezione '{lesson_id}' inesistente")
+        return {
+            "id": lesson_id,
+            "markdown": (_GUIDE_DIR / f"{lesson_id}.md").read_text(encoding="utf-8"),
+        }
 
     @app.post("/api/reset")
     def reset():

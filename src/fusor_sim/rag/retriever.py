@@ -28,14 +28,17 @@ class Passage:
 
 
 class KnowledgeBase:
-    def __init__(self, knowledge_dir: str | Path):
-        self.dir = Path(knowledge_dir)
+    def __init__(self, knowledge_dirs: str | Path | list[str | Path]):
+        if isinstance(knowledge_dirs, (str, Path)):
+            knowledge_dirs = [knowledge_dirs]
+        self.dirs = [Path(d) for d in knowledge_dirs]
         self._passages: list[tuple[str, str, list[str]]] = []  # (source, text, tokens)
-        for path in sorted(self.dir.glob("*.md")):
-            for chunk in self._chunks(path.read_text(encoding="utf-8")):
-                self._passages.append((path.stem, chunk, _tokens(chunk)))
+        for directory in self.dirs:
+            for path in sorted(directory.glob("*.md")):
+                for chunk in self._chunks(path.read_text(encoding="utf-8")):
+                    self._passages.append((path.stem, chunk, _tokens(chunk)))
         if not self._passages:
-            raise ValueError(f"Nessun documento in {self.dir}")
+            raise ValueError(f"Nessun documento in {self.dirs}")
 
         self._avg_len = sum(len(t) for *_, t in self._passages) / len(self._passages)
         self._df: dict[str, int] = {}

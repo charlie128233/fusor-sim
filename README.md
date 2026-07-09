@@ -11,6 +11,7 @@ Visione completa e architettura: [VISION.md](VISION.md).
 - [x] **4. Orchestratore + state machine** — IDLE → CONFIG → RUN → PAUSED → DONE, gating strutturale della chat, router, auto-tuner con probe empirico, vincoli espliciti (`src/fusor_sim/orchestrator/`)
 - [x] **5. Visualizzatore** — app web (FastAPI + Plotly): potenziale, spettro ioni, serie temporali, referto con affidabilità (`src/fusor_sim/app/`)
 - [x] **6. Chat/LLM + RAG** — pipeline linguaggio naturale → ChatIntent validati, endpoint LLM OpenAI-compatible, libro delle formule con retrieval BM25 (`src/fusor_sim/chat/`, `src/fusor_sim/rag/`, `knowledge/`)
+- [x] **6c. Guida didattica** — percorso in 9 lezioni (base → padronanza) in `guide/`: teoria, esperimenti guidati cliccabili che precompilano la chat, domande di verifica e test di padronanza; indicizzata dal RAG (l'LLM fa da tutor e cita le lezioni), avanzamento salvato in locale, scheda «Guida» nella UI
 - [x] **6b. Scena 3D interattiva** — viewer/editor Three.js: componenti cliccabili, slider e drag del catodo (stesso percorso intent validato della chat), particelle come ricostruzione isotropa dichiarata. Offset del catodo nei contratti: la geometria non concentrica è **realizzabile ma non giudicabile** (il router lo dichiara) e ha l'**anteprima "solo campo"** — Poisson 3D cartesiano a elettrodi immersi (CG matrix-free), referto con scope `field_only` strutturalmente privo di numeri di fusione
 
 Estensioni future (punto 7): tokamak (Grad-Shafranov sullo stesso risolutore

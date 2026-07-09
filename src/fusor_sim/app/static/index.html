@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>fusor-sim — simulatore didattico di fusione</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script type="importmap">
 { "imports": {
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -56,8 +57,48 @@
   .llm-dot { margin-left: auto; font-size: 12px; color: var(--text-muted); }
   main { flex: 1; display: grid; grid-template-columns: 400px 1fr; min-height: 0; }
 
-  /* ---- chat ---- */
-  #chat { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
+  /* ---- colonna sinistra: chat + guida ---- */
+  #left { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
+  #tabs { display: flex; border-bottom: 1px solid var(--border); }
+  #tabs button {
+    flex: 1; border: none; border-radius: 0; background: none;
+    padding: 10px; color: var(--text-muted); font-weight: 600;
+  }
+  #tabs button.active { color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--series-1); }
+  #chat { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  #chat.active { display: flex; }
+
+  /* ---- guida ---- */
+  #guide { display: none; flex: 1; overflow-y: auto; padding: 12px; }
+  #guide.active { display: block; }
+  .lesson-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    margin-bottom: 8px; padding: 10px 12px;
+  }
+  .lesson-item .lvl {
+    flex: 0 0 auto; font-size: 10px; text-transform: uppercase; font-weight: 700;
+    padding: 1px 7px; border-radius: 8px; border: 1px solid currentColor;
+  }
+  .lvl.base { color: var(--series-2); }
+  .lvl.intermedio { color: var(--series-3); }
+  .lvl.avanzato { color: var(--series-6); }
+  .lesson-item .done-mark { margin-left: auto; color: var(--status-good); font-weight: 700; }
+  #lesson-view { display: none; }
+  #lesson-view .lesson-nav { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+  #lesson-body { color: var(--text-secondary); font-size: 13.5px; }
+  #lesson-body h1 { font-size: 17px; color: var(--text-primary); }
+  #lesson-body h2 { font-size: 14px; color: var(--text-primary); margin-top: 18px; }
+  #lesson-body code { background: var(--page); padding: 1px 5px; border-radius: 4px; }
+  #lesson-body blockquote {
+    margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--baseline);
+    background: rgba(255,255,255,0.03);
+  }
+  .try-prompt {
+    display: block; width: 100%; text-align: left; margin: 10px 0;
+    background: #1c3a5e; border-color: var(--series-1); font-size: 13px;
+  }
+  .try-prompt::before { content: '💬 '; }
+  .lesson-done { margin: 16px 0; width: 100%; }
   #messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   .msg { padding: 8px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
   .msg.user { align-self: flex-end; background: #1c3a5e; }
@@ -131,16 +172,34 @@
   <span id="llm" class="llm-dot">LLM: …</span>
 </header>
 <main>
-  <section id="chat">
-    <div id="messages">
-      <div class="msg sys">Chiedi in linguaggio naturale: «porta la tensione a −60 kV e avvia»,
-        «sposta il catodo di 2 cm», «perché il bilancio è negativo?»
-        Puoi anche cliccare un componente nella scena 3D e riferirti a quello.</div>
+  <section id="left">
+    <div id="tabs">
+      <button id="tab-chat" class="active">Chat</button>
+      <button id="tab-guide">Guida</button>
     </div>
-    <form id="chatform">
-      <input id="chatinput" placeholder="Scrivi al simulatore…" autocomplete="off">
-      <button class="primary" type="submit">Invia</button>
-    </form>
+    <div id="chat" class="active">
+      <div id="messages">
+        <div class="msg sys">Chiedi in linguaggio naturale: «porta la tensione a −60 kV e avvia»,
+          «sposta il catodo di 2 cm», «perché il bilancio è negativo?»
+          Puoi cliccare un componente nella scena 3D e riferirti a quello.
+          Nuovo qui? Apri la scheda «Guida»: 9 lezioni con esperimenti guidati.</div>
+      </div>
+      <form id="chatform">
+        <input id="chatinput" placeholder="Scrivi al simulatore…" autocomplete="off">
+        <button class="primary" type="submit">Invia</button>
+      </form>
+    </div>
+    <div id="guide">
+      <div id="lesson-list"></div>
+      <div id="lesson-view">
+        <div class="lesson-nav">
+          <button id="lesson-back">← Indice</button>
+          <span id="lesson-progress" class="meta" style="color:var(--text-muted);font-size:12px"></span>
+        </div>
+        <div id="lesson-body"></div>
+        <button class="lesson-done" id="lesson-done"></button>
+      </div>
+    </div>
   </section>
   <section id="panel">
     <div id="controls">
@@ -349,6 +408,85 @@ document.getElementById('btn-preview').addEventListener('click', async () => {
   catch (err) { addMsg('anteprima: ' + err.message, 'sys'); }
   finally { btn.disabled = false; btn.textContent = 'Campo 3D'; }
 });
+
+/* ============ guida didattica ============ */
+const doneKey = id => 'fusor-guide-done-' + id;
+let currentLesson = null, guideLessons = [];
+
+function switchTab(which) {
+  document.getElementById('tab-chat').classList.toggle('active', which === 'chat');
+  document.getElementById('tab-guide').classList.toggle('active', which === 'guide');
+  document.getElementById('chat').classList.toggle('active', which === 'chat');
+  document.getElementById('guide').classList.toggle('active', which === 'guide');
+}
+document.getElementById('tab-chat').addEventListener('click', () => switchTab('chat'));
+document.getElementById('tab-guide').addEventListener('click', () => { switchTab('guide'); loadGuideIndex(); });
+
+async function loadGuideIndex() {
+  const data = await jget('/api/guide');
+  guideLessons = data.lessons;
+  const list = document.getElementById('lesson-list');
+  document.getElementById('lesson-view').style.display = 'none';
+  list.style.display = 'block';
+  list.innerHTML = '';
+  const doneCount = guideLessons.filter(l => localStorage.getItem(doneKey(l.id))).length;
+  const head = document.createElement('div');
+  head.className = 'msg sys';
+  head.style.marginBottom = '10px';
+  head.textContent = `Percorso didattico: dalla prima scintilla alla padronanza — ${doneCount}/${guideLessons.length} lezioni completate`;
+  list.appendChild(head);
+  for (const lesson of guideLessons) {
+    const btn = document.createElement('button');
+    btn.className = 'lesson-item';
+    btn.innerHTML = `<span class="lvl ${lesson.level}">${lesson.level}</span><span>${lesson.title}</span>` +
+      (localStorage.getItem(doneKey(lesson.id)) ? '<span class="done-mark">✓</span>' : '');
+    btn.title = lesson.objective;
+    btn.addEventListener('click', () => openLesson(lesson.id));
+    list.appendChild(btn);
+  }
+}
+
+async function openLesson(id) {
+  const data = await jget('/api/guide/' + id);
+  currentLesson = id;
+  document.getElementById('lesson-list').style.display = 'none';
+  const view = document.getElementById('lesson-view');
+  view.style.display = 'block';
+  const idx = guideLessons.findIndex(l => l.id === id);
+  document.getElementById('lesson-progress').textContent = `lezione ${idx + 1} di ${guideLessons.length}`;
+  const body = document.getElementById('lesson-body');
+  body.innerHTML = marked.parse(data.markdown);
+  // i blockquote «💬 …» diventano prompt cliccabili che vanno in chat
+  for (const bq of [...body.querySelectorAll('blockquote')]) {
+    const text = bq.textContent.trim();
+    if (!text.startsWith('💬')) continue;
+    const btn = document.createElement('button');
+    btn.className = 'try-prompt';
+    btn.textContent = text.replace(/^💬\s*/, '');
+    btn.addEventListener('click', () => {
+      switchTab('chat');
+      const input = document.getElementById('chatinput');
+      input.value = btn.textContent;
+      input.focus();
+    });
+    bq.replaceWith(btn);
+  }
+  refreshDoneButton();
+  document.getElementById('guide').scrollTop = 0;
+}
+
+function refreshDoneButton() {
+  const btn = document.getElementById('lesson-done');
+  const done = !!localStorage.getItem(doneKey(currentLesson));
+  btn.textContent = done ? '✓ Lezione completata (clicca per annullare)' : 'Segna come completata';
+  btn.className = 'lesson-done' + (done ? ' primary' : '');
+}
+document.getElementById('lesson-done').addEventListener('click', () => {
+  const key = doneKey(currentLesson);
+  localStorage.getItem(key) ? localStorage.removeItem(key) : localStorage.setItem(key, '1');
+  refreshDoneButton();
+});
+document.getElementById('lesson-back').addEventListener('click', loadGuideIndex);
 
 poll();
 </script>
