@@ -5,6 +5,7 @@ mai generato al volo. Il router sceglie per id; un id sconosciuto è un
 errore esplicito, non un fallback silenzioso.
 """
 
+from fusor_sim.solvers.grad_shafranov import GradShafranovSolver
 from fusor_sim.solvers.poisson_cartesian3d import PoissonCartesian3DSolver
 from fusor_sim.solvers.poisson_spherical import PoissonSphericalSolver
 
@@ -17,12 +18,21 @@ _FIELD_SOLVERS: dict[str, type] = {
     PoissonCartesian3DSolver.solver_id: PoissonCartesian3DSolver,
 }
 
-def _pushers() -> dict[str, type]:
-    # import pigro: il motore usa il catalogo per risolvere il solver
-    # Poisson, un import a livello di modulo creerebbe un ciclo
-    from fusor_sim.engine.simulation import RadialPICEngine
+# solver di equilibrio magnetico (tokamak)
+_EQUILIBRIUM_SOLVERS: dict[str, type] = {
+    GradShafranovSolver.solver_id: GradShafranovSolver,
+}
 
-    return {RadialPICEngine.pusher_id: RadialPICEngine}
+def _pushers() -> dict[str, type]:
+    # import pigro: i motori usano il catalogo per risolvere i solver,
+    # un import a livello di modulo creerebbe un ciclo
+    from fusor_sim.engine.simulation import RadialPICEngine
+    from fusor_sim.engine.tokamak import Tokamak0DEngine
+
+    return {
+        RadialPICEngine.pusher_id: RadialPICEngine,
+        Tokamak0DEngine.engine_id: Tokamak0DEngine,
+    }
 
 
 def get_poisson_solver(solver_id: str) -> PoissonSphericalSolver:
@@ -41,6 +51,15 @@ def get_field_solver(solver_id: str) -> PoissonCartesian3DSolver:
             f"(validi: {sorted(_FIELD_SOLVERS)})"
         )
     return _FIELD_SOLVERS[solver_id]()
+
+
+def get_equilibrium_solver(solver_id: str) -> GradShafranovSolver:
+    if solver_id not in _EQUILIBRIUM_SOLVERS:
+        raise KeyError(
+            f"Solver di equilibrio '{solver_id}' non nel catalogo "
+            f"(validi: {sorted(_EQUILIBRIUM_SOLVERS)})"
+        )
+    return _EQUILIBRIUM_SOLVERS[solver_id]()
 
 
 def get_pusher_class(pusher_id: str) -> type:

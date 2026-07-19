@@ -9,6 +9,7 @@ modifiche fuori competenza.
 from enum import Enum
 
 from fusor_sim.contracts import run_config as _rc
+from fusor_sim.contracts import tokamak as _tk
 
 
 class Owner(str, Enum):
@@ -24,6 +25,10 @@ GROUP_OWNERS: dict[str, Owner] = {
     "numerics": Owner.AUTO_TUNER,
     "solver_selection": Owner.ROUTER,
     "run_control": Owner.ORCHESTRATOR,
+    # dominio tokamak: stessi ruoli, gruppi con prefisso
+    "tokamak_geometry": Owner.USER,
+    "tokamak_physics": Owner.USER,
+    "tokamak_numerics": Owner.AUTO_TUNER,
 }
 
 _GROUP_MODELS = {
@@ -32,6 +37,9 @@ _GROUP_MODELS = {
     "numerics": _rc.NumericsConfig,
     "solver_selection": _rc.SolverSelection,
     "run_control": _rc.RunControl,
+    "tokamak_geometry": _tk.TokamakGeometryConfig,
+    "tokamak_physics": _tk.TokamakPhysicsConfig,
+    "tokamak_numerics": _tk.TokamakNumericsConfig,
 }
 
 

@@ -75,6 +75,32 @@ def tune_numerics(
     )
 
 
+def tune_tokamak_numerics(geometry, physics) -> "TokamakNumericsConfig":
+    """Numerica del tokamak: griglia dell'equilibrio e passo del bilancio 0D.
+
+    Il passo deve risolvere il tempo di confinamento: dt = tau_E/100
+    stimato a 5 keV con il solo riscaldamento ausiliario (il motore poi
+    misura l'errore locale reale e il referto giudica).
+    """
+    from fusor_sim.contracts.tokamak import TokamakNumericsConfig
+
+    eps = geometry.minor_radius_m / geometry.major_radius_m
+    p_mw = max(physics.aux_heating_mw, 0.1)
+    tau = (
+        0.0562
+        * geometry.plasma_current_ma**0.93
+        * geometry.toroidal_field_t**0.15
+        * p_mw**-0.69
+        * physics.density_1e19_m3**0.41
+        * 2.5**0.19
+        * geometry.major_radius_m**1.97
+        * eps**0.58
+        * geometry.elongation**0.78
+    ) * physics.h_factor
+    dt = float(np.clip(tau / 100.0, 1e-6, 1.0))
+    return TokamakNumericsConfig(grid_resolution=65, dt_s=dt)
+
+
 def _probe_health(
     geometry: GeometryConfig,
     physics: PhysicsConfig,

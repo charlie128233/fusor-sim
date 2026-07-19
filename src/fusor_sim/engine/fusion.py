@@ -55,3 +55,37 @@ def cross_sections_m2(
         return (s_n + s_p) * BARN_M2, s_n * BARN_M2
     s = _duane_sigma_barn(_DUANE["DT"], e_kev) * BARN_M2
     return s, s
+
+
+# --------------------------------------------------------------------------
+# Reattività termica <sigma*v> per plasmi maxwelliani (tokamak).
+# Parametrizzazione di Bosch-Hale (Nucl. Fusion 32, 1992), D-T,
+# valida per T tra 0.2 e 100 keV.
+
+SIGMAV_DT_VALID_KEV = (0.2, 100.0)
+
+_BH_DT_BG = 34.3827  # keV^(1/2)
+_BH_DT_MRC2 = 1.124656e6  # keV
+_BH_DT_C = (1.17302e-9, 1.51361e-2, 7.51886e-2, 4.60643e-3,
+            1.35000e-2, -1.06750e-4, 1.36600e-5)
+
+
+def sigmav_dt_m3_s(t_kev: float) -> float:
+    """<sigma*v> D-T in m^3/s per temperatura ionica in keV.
+
+    Fuori dal range di validità restituisce 0: chi chiama deve marcare
+    il risultato come inaffidabile, non estrapolare in silenzio.
+    """
+    if not SIGMAV_DT_VALID_KEV[0] <= t_kev <= SIGMAV_DT_VALID_KEV[1]:
+        return 0.0
+    c1, c2, c3, c4, c5, c6, c7 = _BH_DT_C
+    t = t_kev
+    theta = t / (1.0 - (t * (c2 + t * (c4 + t * c6)))
+                 / (1.0 + t * (c3 + t * (c5 + t * c7))))
+    xi = (_BH_DT_BG**2 / (4.0 * theta)) ** (1.0 / 3.0)
+    sv_cm3_s = c1 * theta * np.sqrt(xi / (_BH_DT_MRC2 * t**3)) * np.exp(-3.0 * xi)
+    return float(sv_cm3_s) * 1e-6
+
+
+E_DT_TOTAL_J = 17.59 * MEV_J  # energia per reazione D-T
+E_DT_ALPHA_J = 3.52 * MEV_J  # frazione che resta nel plasma (particella alfa)

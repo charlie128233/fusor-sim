@@ -7,6 +7,7 @@ un solver Grad-Shafranov, senza toccare orchestratore o motore.
 
 from fusor_sim.catalog import available_poisson_solvers, available_pushers
 from fusor_sim.contracts.run_config import GeometryConfig, SolverSelection
+from fusor_sim.contracts.tokamak import TokamakSolverSelection
 
 _ROUTING_TABLE = {
     "spherical": SolverSelection(
@@ -39,4 +40,15 @@ def select_solvers(geometry: GeometryConfig) -> SolverSelection:
     # difesa in profondità: la tabella deve puntare a implementazioni validate
     assert selection.poisson_solver_id in available_poisson_solvers()
     assert selection.pusher_id in available_pushers()
+    return selection
+
+
+def select_tokamak_solvers() -> TokamakSolverSelection:
+    """Il dominio tokamak ha una sola via nel catalogo attuale:
+    equilibrio Grad-Shafranov (Solov'ev) + motore 0D."""
+    selection = TokamakSolverSelection(
+        equilibrium_solver_id="grad_shafranov_solovev_v1",
+        engine_id="tokamak_0d_v1",
+    )
+    assert selection.engine_id in available_pushers()
     return selection

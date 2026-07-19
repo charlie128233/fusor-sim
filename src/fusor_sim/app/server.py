@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from fusor_sim.chat import ChatPipeline, LLMClient
 from fusor_sim.contracts.sim_state import SimState
+from fusor_sim.contracts.tokamak import TokamakState
 from fusor_sim.orchestrator import Orchestrator, OrchestratorState, StateError
 from fusor_sim.rag import KnowledgeBase
 
@@ -127,20 +128,35 @@ class AppContext:
                     self._record(state)
             time.sleep(0.005)  # lascia respirare le richieste HTTP
 
-    def _record(self, state: SimState) -> None:
-        self.snapshot = _serialize(state, self.orchestrator)
+    def _record(self, state) -> None:
         d, h = state.diagnostics, state.health
-        self.series.append(
-            {
-                "step": state.meta.step,
-                "sim_time_s": state.meta.sim_time_s,
-                "neutron_rate_per_s": d.neutron_rate_per_s,
-                "fusion_rate_per_s": d.fusion_rate_per_s,
-                "grid_loss_w": d.grid_loss_w,
-                "recirculation": d.recirculation_efficiency,
-                "energy_error": h.energy_conservation_error,
-            }
-        )
+        if isinstance(state, TokamakState):
+            self.snapshot = _serialize_tokamak(state)
+            self.series.append(
+                {
+                    "step": state.meta.step,
+                    "sim_time_s": state.meta.sim_time_s,
+                    "t_kev": d.t_kev,
+                    "q_factor": d.q_factor,
+                    "fusion_power_w": d.fusion_power_w,
+                    "aux_power_w": d.aux_power_w,
+                    "tau_e_s": d.tau_e_s,
+                    "energy_error": h.energy_conservation_error,
+                }
+            )
+        else:
+            self.snapshot = _serialize(state, self.orchestrator)
+            self.series.append(
+                {
+                    "step": state.meta.step,
+                    "sim_time_s": state.meta.sim_time_s,
+                    "neutron_rate_per_s": d.neutron_rate_per_s,
+                    "fusion_rate_per_s": d.fusion_rate_per_s,
+                    "grid_loss_w": d.grid_loss_w,
+                    "recirculation": d.recirculation_efficiency,
+                    "energy_error": h.energy_conservation_error,
+                }
+            )
 
 
 def _compute_preview(ctx: AppContext) -> None:
@@ -162,11 +178,51 @@ def _compute_preview(ctx: AppContext) -> None:
         ctx.field_preview = serialized
 
 
+def _serialize_tokamak(state: TokamakState) -> dict:
+    d = state.diagnostics
+    return {
+        "domain": "tokamak",
+        "kind": state.kind,
+        "meta": {
+            "step": state.meta.step,
+            "sim_time_s": state.meta.sim_time_s,
+            "status": state.meta.status.value,
+            "wall_clock_s": state.meta.wall_clock_s,
+        },
+        "flux": {
+            "r_axis_m": state.flux.r_axis_m.tolist(),
+            "z_axis_m": state.flux.z_axis_m.tolist(),
+            "psi": state.flux.psi.tolist(),
+            "psi_boundary": state.flux.psi_boundary,
+            "magnetic_axis_r_m": state.flux.magnetic_axis_r_m,
+        },
+        "diagnostics": {
+            "t_kev": d.t_kev,
+            "fusion_power_w": d.fusion_power_w,
+            "alpha_power_w": d.alpha_power_w,
+            "aux_power_w": d.aux_power_w,
+            "brems_power_w": d.brems_power_w,
+            "transport_power_w": d.transport_power_w,
+            "tau_e_s": d.tau_e_s,
+            "q_factor": d.q_factor,
+            "triple_product_kev_s_m3": d.triple_product_kev_s_m3,
+            "neutron_rate_per_s": d.neutron_rate_per_s,
+        },
+        "health": {
+            "energy_conservation_error": state.health.energy_conservation_error,
+            "cfl_number": state.health.cfl_number,
+            "warnings": list(state.health.warnings),
+        },
+        "verdict": state.physics_verdict.model_dump(mode="json"),
+    }
+
+
 def _serialize(state: SimState, orch: Orchestrator) -> dict:
     cfg = orch.run_config
     n = len(state.fields.potential_v)
     r = np.linspace(0.0, cfg.geometry.anode_radius_m, n)
     return {
+        "domain": "fusor",
         "kind": state.kind,
         "meta": {
             "step": state.meta.step,
@@ -223,8 +279,11 @@ def create_app(llm: Callable[[list[dict]], str] | None = None) -> FastAPI:
             judgeable, reason = orch.judgeable()
             return {
                 "state": orch.state.value,
+                "domain": orch.domain,
                 "geometry": orch.geometry.model_dump(),
                 "physics": orch.physics.model_dump(),
+                "tokamak_geometry": orch.tokamak_geometry.model_dump(),
+                "tokamak_physics": orch.tokamak_physics.model_dump(),
                 "constraints": [c.describe() for c in orch.constraints],
                 "judgeable": judgeable,
                 "judgeable_reason": reason,
@@ -247,6 +306,10 @@ def create_app(llm: Callable[[list[dict]], str] | None = None) -> FastAPI:
             outcome = ctx.pipeline.handle(
                 req.message, selected_component=req.selected_component
             )
+            if outcome.switch_domain:
+                ctx.snapshot = None
+                ctx.series = []
+                ctx.field_preview = None
         run_started = False
         if outcome.start_run:
             try:
@@ -327,6 +390,19 @@ def create_app(llm: Callable[[list[dict]], str] | None = None) -> FastAPI:
                 raise HTTPException(status_code=409, detail=str(exc))
         ctx._spawn_thread()
         return {"ok": True}
+
+    @app.post("/api/domain")
+    def set_domain(payload: dict):
+        domain = str(payload.get("domain", ""))
+        with ctx.lock:
+            try:
+                ctx.orchestrator.set_domain(domain)
+            except (StateError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            ctx.snapshot = None
+            ctx.series = []
+            ctx.field_preview = None
+        return {"ok": True, "domain": domain}
 
     @app.get("/api/guide")
     def guide_index():

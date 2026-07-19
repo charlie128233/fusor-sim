@@ -41,6 +41,19 @@ disponibile solo l'anteprima 3D del campo elettrostatico. Dichiaralo sempre.
 I parametri numerici (numerics.*) e i solver NON si toccano: appartengono \
 all'auto-tuner e al router.
 
+Esiste anche il DOMINIO TOKAMAK (modello 0D + equilibrio Grad-Shafranov), \
+parametri modificabili:
+- tokamak_geometry.major_radius_m: raggio maggiore R0 (0.3-12 m)
+- tokamak_geometry.minor_radius_m: raggio minore a (< R0/1.5)
+- tokamak_geometry.elongation: elongazione kappa (1-2.5)
+- tokamak_geometry.toroidal_field_t: campo toroidale B0 (0.5-14 T)
+- tokamak_geometry.plasma_current_ma: corrente di plasma (0.1-20 MA)
+- tokamak_physics.density_1e19_m3: densità (0.1-50, in 1e19 m^-3)
+- tokamak_physics.aux_heating_mw: riscaldamento ausiliario (0-200 MW)
+- tokamak_physics.h_factor: fattore H di confinamento (0.5-1.5)
+Se l'utente vuole passare al tokamak (o tornare al fusore), usa il campo \
+"switch_domain". Gli intent tokamak_* funzionano solo nel dominio tokamak.
+
 Rispondi SOLO con un oggetto JSON, nessun testo fuori dal JSON:
 {
   "reply": "risposta in italiano per l'utente",
@@ -49,7 +62,8 @@ Rispondi SOLO con un oggetto JSON, nessun testo fuori dal JSON:
      "value": <numero o stringa>, "rationale": "eventuale fonte citata"}
   ],
   "start_run": true|false,
-  "preview_field": true|false
+  "preview_field": true|false,
+  "switch_domain": null | "fusor" | "tokamak"
 }
 - intents vuoto se l'utente chiede solo spiegazioni.
 - SCALE usa un fattore numerico (es. 2 per raddoppiare).
@@ -78,6 +92,7 @@ class ChatOutcome:
     intent_results: list[tuple[str, IntentResult]] = field(default_factory=list)
     start_run: bool = False
     preview_field: bool = False
+    switch_domain: str | None = None
     sources: list[str] = field(default_factory=list)
 
 
@@ -121,6 +136,13 @@ class ChatPipeline:
         data = _extract_json(raw)
         reply = str(data.get("reply") or raw).strip()
 
+        switch = data.get("switch_domain")
+        if switch in ("fusor", "tokamak") and switch != orch.domain:
+            orch.set_domain(switch)
+            reply += f"\n[dominio: {switch}]"
+        else:
+            switch = None
+
         results: list[tuple[str, IntentResult]] = []
         for item in data.get("intents", []):
             label, result = self._apply(item)
@@ -135,6 +157,7 @@ class ChatPipeline:
             intent_results=results,
             start_run=bool(data.get("start_run")),
             preview_field=bool(data.get("preview_field")),
+            switch_domain=switch,
             sources=sorted({p.source for p in passages}),
         )
 
@@ -146,9 +169,20 @@ class ChatPipeline:
         orch = self.orchestrator
         context = [
             f"STATO ORCHESTRATORE: {orch.state.value}",
-            f"CONFIGURAZIONE ATTUALE (bozza): geometry={orch.geometry.model_dump()} "
-            f"physics={orch.physics.model_dump()}",
+            f"DOMINIO ATTIVO: {orch.domain}",
         ]
+        if orch.domain == "tokamak":
+            context.append(
+                "CONFIGURAZIONE TOKAMAK (bozza): "
+                f"tokamak_geometry={orch.tokamak_geometry.model_dump()} "
+                f"tokamak_physics={orch.tokamak_physics.model_dump()}"
+            )
+        else:
+            context.append(
+                "CONFIGURAZIONE ATTUALE (bozza): "
+                f"geometry={orch.geometry.model_dump()} "
+                f"physics={orch.physics.model_dump()}"
+            )
         judgeable, reason = orch.judgeable()
         if not judgeable:
             context.append(f"CONFIGURAZIONE NON GIUDICABILE: {reason}")

@@ -14,9 +14,18 @@ Visione completa e architettura: [VISION.md](VISION.md).
 - [x] **6c. Guida didattica** — percorso in 9 lezioni (base → padronanza) in `guide/`: teoria, esperimenti guidati cliccabili che precompilano la chat, domande di verifica e test di padronanza; indicizzata dal RAG (l'LLM fa da tutor e cita le lezioni), avanzamento salvato in locale, scheda «Guida» nella UI
 - [x] **6b. Scena 3D interattiva** — viewer/editor Three.js: componenti cliccabili, slider e drag del catodo (stesso percorso intent validato della chat), particelle come ricostruzione isotropa dichiarata. Offset del catodo nei contratti: la geometria non concentrica è **realizzabile ma non giudicabile** (il router lo dichiara) e ha l'**anteprima "solo campo"** — Poisson 3D cartesiano a elettrodi immersi (CG matrix-free), referto con scope `field_only` strutturalmente privo di numeri di fusione
 
-Estensioni future (punto 7): tokamak (Grad-Shafranov sullo stesso risolutore
-ellittico), catalogo componenti reali (i vincoli espliciti sono già il gancio),
-ponte hardware.
+- [x] **7a. Tokamak** — secondo dominio completo: equilibrio 2D **Grad-Shafranov**
+  (profili di Solov'ev, CG matrix-free, validato ESATTAMENTE contro la soluzione
+  analitica) + motore dinamico **0D a bilancio di potenza** (reattività Bosch-Hale,
+  riscaldamento alfa, bremsstrahlung, confinamento da scaling IPB98(y,2), errore
+  d'integrazione misurato) — stesso `PhysicsVerdict`, con zero perdite su griglia
+  e distanza da Lawson in ordini ~1 invece di ~15. Selettore di dominio nella UI,
+  superfici di flusso, T(t), potenze e Q(t); lezione 9 nella guida.
+  Non modellati (dichiarato nel referto): profili radiali, impurità, limiti
+  operativi (Greenwald, beta), disruzioni.
+
+Estensioni future: catalogo componenti reali (i vincoli espliciti sono già il
+gancio), ponte hardware, PIC 3D per geometrie fusore non concentriche.
 
 ## Setup
 

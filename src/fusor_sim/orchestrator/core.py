@@ -33,10 +33,31 @@ from fusor_sim.contracts.run_config import (
     example_run_config,
 )
 from fusor_sim.contracts.sim_state import RunStatus, SimState
-from fusor_sim.orchestrator.autotuner import tune_numerics
-from fusor_sim.orchestrator.router import select_solvers
+from fusor_sim.contracts.tokamak import (
+    TokamakGeometryConfig,
+    TokamakPhysicsConfig,
+    TokamakRunConfig,
+)
+from fusor_sim.orchestrator.autotuner import tune_numerics, tune_tokamak_numerics
+from fusor_sim.orchestrator.router import select_solvers, select_tokamak_solvers
 
 _FIELD_PREVIEW_SOLVER_ID = "poisson_cartesian3d_fd_v1"
+
+
+def default_tokamak_geometry() -> TokamakGeometryConfig:
+    """Macchina di media taglia: fusione vera, Q < 1 — il punto di
+    partenza didattico da cui scoprire cosa serve per il pareggio."""
+    return TokamakGeometryConfig(
+        major_radius_m=2.0,
+        minor_radius_m=0.6,
+        elongation=1.7,
+        toroidal_field_t=5.0,
+        plasma_current_ma=5.0,
+    )
+
+
+def default_tokamak_physics() -> TokamakPhysicsConfig:
+    return TokamakPhysicsConfig(density_1e19_m3=8.0, aux_heating_mw=20.0)
 
 
 class OrchestratorState(str, Enum):
@@ -96,6 +117,9 @@ class Orchestrator:
 
     def __post_init__(self) -> None:
         self.state = OrchestratorState.IDLE
+        self.domain = "fusor"  # "fusor" | "tokamak"
+        self.tokamak_geometry = default_tokamak_geometry()
+        self.tokamak_physics = default_tokamak_physics()
         self.constraints: list[Constraint] = []
         self.formula_sources: list[str] = []
         self.run_config: RunConfig | None = None
@@ -216,34 +240,47 @@ class Orchestrator:
                 + "; ".join(c.describe() for c in violated)
             )
 
-        solver_selection = select_solvers(self.geometry)
-        numerics = tune_numerics(
-            self.geometry,
-            self.physics,
-            solver_selection,
-            n_particles=n_particles,
-            probe=probe,
-            seed=self.seed,
+        run_control = RunControl(
+            max_steps=max_steps,
+            snapshot_interval=snapshot_interval,
+            checkpoint_interval=max_steps,
+            stop_conditions=stop_conditions,
         )
-        self.run_config = RunConfig(
-            geometry=self.geometry,
-            physics=self.physics,
-            numerics=numerics,
-            solver_selection=solver_selection,
-            run_control=RunControl(
-                max_steps=max_steps,
-                snapshot_interval=snapshot_interval,
-                checkpoint_interval=max_steps,
-                stop_conditions=stop_conditions,
-            ),
-        )
+        if self.domain == "tokamak":
+            self.run_config = TokamakRunConfig(
+                geometry=self.tokamak_geometry,
+                physics=self.tokamak_physics,
+                numerics=tune_tokamak_numerics(
+                    self.tokamak_geometry, self.tokamak_physics
+                ),
+                solver_selection=select_tokamak_solvers(),
+                run_control=run_control,
+            )
+        else:
+            solver_selection = select_solvers(self.geometry)
+            self.run_config = RunConfig(
+                geometry=self.geometry,
+                physics=self.physics,
+                numerics=tune_numerics(
+                    self.geometry,
+                    self.physics,
+                    solver_selection,
+                    n_particles=n_particles,
+                    probe=probe,
+                    seed=self.seed,
+                ),
+                solver_selection=solver_selection,
+                run_control=run_control,
+            )
         self._transition(OrchestratorState.CONFIG)
         return self.run_config
 
     def start(self) -> None:
         if self.state is not OrchestratorState.CONFIG:
             raise StateError(f"start() richiede CONFIG, stato attuale {self.state.value}")
-        engine_cls = get_pusher_class(self.run_config.solver_selection.pusher_id)
+        sel = self.run_config.solver_selection
+        engine_id = getattr(sel, "pusher_id", None) or sel.engine_id
+        engine_cls = get_pusher_class(engine_id)
         engine = engine_cls(self.run_config, seed=self.seed)
         self._engine_iter = engine.run()
         self.run_states = []
@@ -292,6 +329,9 @@ class Orchestrator:
         defaults = example_run_config()
         self.geometry = defaults.geometry
         self.physics = defaults.physics
+        self.domain = "fusor"
+        self.tokamak_geometry = default_tokamak_geometry()
+        self.tokamak_physics = default_tokamak_physics()
         self.constraints = []
         self.formula_sources = []
         self.run_config = None
@@ -302,8 +342,25 @@ class Orchestrator:
 
     # ------------------------------------------------- anteprima di campo
 
+    def set_domain(self, domain: str) -> None:
+        """Cambia dominio (fusor/tokamak). La bozza dell'altro dominio resta."""
+        if domain not in ("fusor", "tokamak"):
+            raise ValueError(f"Dominio sconosciuto '{domain}' (validi: fusor, tokamak)")
+        if self.state is OrchestratorState.RUN:
+            raise StateError("Cambio dominio non consentito durante RUN")
+        if domain != self.domain:
+            self.domain = domain
+            self.run_config = None
+            self.last_state = None
+            self._discard_engine()
+            self.history.append(f"dominio -> {domain}")
+            if self.state is not OrchestratorState.IDLE:
+                self._transition(OrchestratorState.IDLE)
+
     def judgeable(self) -> tuple[bool, str]:
         """La bozza attuale è giudicabile (esiste un solver per la fusione)?"""
+        if self.domain == "tokamak":
+            return True, ""
         try:
             select_solvers(self.geometry)
             return True, ""
@@ -318,6 +375,11 @@ class Orchestrator:
         """
         if self.state is OrchestratorState.RUN:
             raise StateError("Anteprima di campo non disponibile durante RUN")
+        if self.domain != "fusor":
+            raise StateError(
+                "L'anteprima di campo elettrostatico è del dominio fusore; "
+                "nel tokamak l'equilibrio si vede nella mappa di flusso del run"
+            )
         solver = get_field_solver(_FIELD_PREVIEW_SOLVER_ID)
         field = solver.solve(self.geometry, self.physics.cathode_voltage_v, n_nodes)
 

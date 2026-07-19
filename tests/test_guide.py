@@ -29,7 +29,7 @@ def client():
 
 def test_lessons_exist_and_well_formed():
     files = sorted(GUIDE.glob("*.md"))
-    assert len(files) == 9
+    assert len(files) == 10
     for path in files:
         lines = path.read_text(encoding="utf-8").splitlines()
         assert lines[0].startswith("# Lezione"), path.name
@@ -57,7 +57,7 @@ def test_lessons_have_clickable_experiments():
 
 def test_guide_index_endpoint(client):
     lessons = client.get("/api/guide").json()["lessons"]
-    assert len(lessons) == 9
+    assert len(lessons) == 10
     assert lessons[0]["id"] == "00_perche_la_fusione"
     assert [l["id"] for l in lessons] == sorted(l["id"] for l in lessons)
     levels = {l["level"] for l in lessons}

@@ -289,7 +289,7 @@ def test_verdict_marginal_carries_warning():
 
 
 def test_pusher_in_catalog():
-    assert available_pushers() == ["leapfrog_radial_v1"]
+    assert available_pushers() == ["leapfrog_radial_v1", "tokamak_0d_v1"]
     assert get_pusher_class("leapfrog_radial_v1") is RadialPICEngine
     with pytest.raises(KeyError, match="non nel catalogo"):
         get_pusher_class("pusher_inventato_v1")

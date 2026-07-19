@@ -123,6 +123,9 @@
   #controls { display: flex; gap: 8px; padding: 10px 14px; align-items: center; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   #controls .spacer { flex: 1; }
   #controls .meta { color: var(--text-muted); font-size: 12px; }
+  #domain-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-right: 6px; }
+  #domain-switch button { border: none; border-radius: 0; color: var(--text-muted); }
+  #domain-switch button.active { color: var(--text-primary); background: #1c3a5e; }
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 6px; }
 
   /* ---- scena 3D ---- */
@@ -199,6 +202,10 @@
   </section>
   <section id="panel">
     <div id="controls">
+      <span id="domain-switch">
+        <button id="btn-dom-fusor" class="active">Fusore</button>
+        <button id="btn-dom-tokamak">Tokamak</button>
+      </span>
       <button class="primary" id="btn-run">Prepara &amp; Avvia</button>
       <button id="btn-pause">Pausa</button>
       <button id="btn-resume">Riprendi</button>
@@ -251,8 +258,28 @@ const CFG = { displayModeBar: false, responsive: true };
 const lay = (title, extra) => Object.assign({}, LAYOUT, { title: { text: title, font: { size: 12, color: css('--text-primary') } } },
   { xaxis: Object.assign({}, LAYOUT.xaxis, extra.x || {}), yaxis: Object.assign({}, LAYOUT.yaxis, extra.y || {}) });
 
-let lastStep = -1, state = 'idle', previewStamp = '';
+let lastStep = -1, state = 'idle', previewStamp = '', currentDomain = 'fusor';
 window.lastStatus = null;
+
+function purgeCharts() {
+  for (const id of ['plot-potential', 'plot-spectrum', 'plot-neutrons', 'plot-gridloss'])
+    Plotly.purge(id);
+  document.getElementById('verdict').hidden = true;
+  document.getElementById('runmeta').textContent = '';
+}
+
+function applyDomainUI(domain) {
+  if (domain === currentDomain) return;
+  currentDomain = domain;
+  lastStep = -1; previewStamp = '';
+  purgeCharts();
+  if (window.fusor3d) window.fusor3d.clearPreview();
+  document.getElementById('btn-dom-fusor').classList.toggle('active', domain === 'fusor');
+  document.getElementById('btn-dom-tokamak').classList.toggle('active', domain === 'tokamak');
+  // la scena 3D e l'anteprima di campo sono del dominio fusore
+  document.getElementById('scene-card').style.display = domain === 'fusor' ? '' : 'none';
+  document.getElementById('btn-preview').style.display = domain === 'fusor' ? '' : 'none';
+}
 
 async function jget(url) { const r = await fetch(url); return r.json(); }
 async function jpost(url, body) {
@@ -273,6 +300,7 @@ async function poll() {
   try {
     const st = await jget('/api/status');
     window.lastStatus = st;
+    applyDomainUI(st.domain);
     state = st.state; setBadge(state);
     document.getElementById('llm').textContent = 'LLM: ' + (st.llm_available ? 'connesso' : 'assente');
     const nj = document.getElementById('notjudge');
@@ -300,6 +328,7 @@ async function poll() {
 
 function redraw(data) {
   const s = data.snapshot; if (!s) return;
+  if (s.domain === 'tokamak') { redrawTokamak(data); return; }
   document.getElementById('runmeta').textContent =
     `step ${s.meta.step} · t = ${(s.meta.sim_time_s*1e6).toFixed(2)} µs · wall ${s.meta.wall_clock_s.toFixed(1)} s`;
 
@@ -334,6 +363,58 @@ function redraw(data) {
     s.particles.r_m, s.particles.energy_ev, Math.abs(window.lastStatus?.physics?.cathode_voltage_v || 40000));
   drawVerdict(s.verdict);
 }
+
+function redrawTokamak(data) {
+  const s = data.snapshot;
+  document.getElementById('runmeta').textContent =
+    `step ${s.meta.step} · t = ${s.meta.sim_time_s.toFixed(2)} s · wall ${s.meta.wall_clock_s.toFixed(1)} s`;
+
+  // superfici di flusso: contorni di psi nel piano (R, Z)
+  const psi = s.flux.psi;  // [iR][iZ] -> Plotly vuole z[y][x]
+  const zt = psi[0].map((_, j) => psi.map(row => row[j]));
+  Plotly.react('plot-potential', [{
+    x: s.flux.r_axis_m, y: s.flux.z_axis_m, z: zt, type: 'contour',
+    ncontours: 14, colorscale: [[0, '#0d366b'], [1, '#cde2fb']], reversescale: true,
+    showscale: false, line: { width: 1 },
+    hovertemplate: 'R=%{x:.2f} m<br>Z=%{y:.2f} m<br>ψ=%{z:.3g}<extra></extra>',
+  }], lay('Superfici di flusso ψ(R,Z) — equilibrio Grad-Shafranov', {
+    x: { title: 'R (m)' }, y: { title: 'Z (m)', scaleanchor: 'x' } }), CFG);
+
+  const t = data.series.map(p => p.sim_time_s);
+  Plotly.react('plot-spectrum', [{
+    x: t, y: data.series.map(p => p.t_kev), mode: 'lines',
+    line: { color: css('--series-2'), width: 2 },
+    hovertemplate: 't=%{x:.2f} s<br>T=%{y:.2f} keV<extra></extra>',
+  }], lay('Temperatura del plasma', { x: { title: 't (s)' }, y: { title: 'keV' } }), CFG);
+
+  Plotly.react('plot-neutrons', [
+    { x: t, y: data.series.map(p => p.fusion_power_w / 1e6), mode: 'lines', name: 'P fusione',
+      line: { color: css('--series-3'), width: 2 },
+      hovertemplate: 't=%{x:.2f} s<br>%{y:.3g} MW<extra>P fusione</extra>' },
+    { x: t, y: data.series.map(p => p.aux_power_w / 1e6), mode: 'lines', name: 'P ausiliaria',
+      line: { color: css('--series-1'), width: 2, dash: 'dot' },
+      hovertemplate: 't=%{x:.2f} s<br>%{y:.3g} MW<extra>P ausiliaria</extra>' },
+  ], Object.assign(lay('Potenze (MW)', { x: { title: 't (s)' }, y: { title: 'MW' } }),
+    { showlegend: true, legend: { orientation: 'h', y: -0.25 } }), CFG);
+
+  Plotly.react('plot-gridloss', [{
+    x: t, y: data.series.map(p => p.q_factor), mode: 'lines',
+    line: { color: css('--series-6'), width: 2 },
+    hovertemplate: 't=%{x:.2f} s<br>Q=%{y:.2f}<extra></extra>',
+  }], Object.assign(lay('Fattore di guadagno Q = P_fus / P_aux', {
+    x: { title: 't (s)' }, y: { title: 'Q' } }),
+    { shapes: [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 1, y1: 1,
+      line: { color: css('--text-muted'), width: 1, dash: 'dash' } }] }), CFG);
+
+  drawVerdict(s.verdict);
+}
+
+const setDomain = async domain => {
+  try { await jpost('/api/domain', { domain }); }
+  catch (err) { addMsg('dominio: ' + err.message, 'sys'); }
+};
+document.getElementById('btn-dom-fusor').addEventListener('click', () => setDomain('fusor'));
+document.getElementById('btn-dom-tokamak').addEventListener('click', () => setDomain('tokamak'));
 
 function drawVerdict(v) {
   const box = document.getElementById('verdict'); box.hidden = false;
